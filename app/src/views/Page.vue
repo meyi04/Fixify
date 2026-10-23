@@ -1,30 +1,78 @@
 <script setup>
 import { computed } from 'vue';
-import { useRoute } from 'vue-router';
-import { session } from '../api';
+import { useRoute, useRouter } from 'vue-router';
+import { session, img, api, setSession } from '../api';
 import { menus } from '../nav';
+import { calendarClearOutline, constructOutline, logOutOutline, personOutline } from 'ionicons/icons';
 defineProps({ title: String });
-const route = useRoute();
+const route = useRoute(), router = useRouter();
 const tabs = computed(() => (menus[session.user?.role] || []).slice(0, 5));
+const roleLabel = computed(() => ({
+  client: 'Customer',
+  shop: 'Repair shop',
+  technician: 'Technician',
+  admin: 'Administration',
+}[session.user?.role] || 'Workspace'));
+const navItems = computed(() => menus[session.user?.role] || []);
+const currentItem = computed(() => navItems.value.find((item) => route.path === item.to
+  || (item.to !== '/dashboard' && route.path.startsWith(item.to + '/'))
+  || (item.to === '/browse' && route.path.startsWith('/provider/'))));
+const today = new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric' }).format(new Date());
+const isActive = (path) => route.path === path
+  || (path !== '/dashboard' && route.path.startsWith(path + '/'))
+  || (path === '/browse' && route.path.startsWith('/provider/'));
+async function logout() {
+  try { await api('/auth/logout-all', { method: 'POST' }); } catch {}
+  setSession(null, null);
+  router.replace('/login');
+}
 </script>
 
 <template>
   <ion-page>
     <ion-header>
-      <ion-toolbar>
+      <ion-toolbar class="page-toolbar">
         <ion-buttons slot="start"><ion-menu-button class="ion-hide-lg-up" /></ion-buttons>
-        <ion-title>{{ title }}</ion-title>
-        <ion-buttons slot="end"><slot name="actions" /></ion-buttons>
+        <ion-title>
+          <span class="page-heading">
+            <span class="page-glyph"><ion-icon :icon="currentItem?.i || constructOutline" /></span>
+            <span class="page-heading-copy">
+              <span class="page-context"><span class="context-brand">FIXIFY</span><span class="context-dot">/</span>{{ roleLabel }} workspace</span>
+              <span class="page-title">{{ title }}</span>
+            </span>
+          </span>
+        </ion-title>
+        <ion-buttons slot="end" class="page-header-actions">
+          <slot name="actions" />
+          <span class="header-date ion-hide-sm-down"><ion-icon :icon="calendarClearOutline" /><span>{{ today }}</span></span>
+          <ion-button class="header-profile-mobile ion-hide-md-up" fill="clear" router-link="/profile" aria-label="Open your profile">
+            <img v-if="session.user?.avatar" class="header-avatar" :src="img(session.user.avatar)" alt="" />
+            <span v-else class="header-avatar header-avatar-fallback"><ion-icon :icon="personOutline" /></span>
+          </ion-button>
+          <ion-button class="header-account ion-hide-md-down" fill="clear" router-link="/profile" aria-label="Open your profile">
+            <img v-if="session.user?.avatar" class="header-avatar" :src="img(session.user.avatar)" alt="" />
+            <span v-else class="header-avatar header-avatar-fallback"><ion-icon :icon="personOutline" /></span>
+            <span class="header-user"><strong>{{ session.user?.name }}</strong></span>
+          </ion-button>
+          <ion-button class="header-signout" fill="clear" @click="logout" aria-label="Sign out">
+            <ion-icon :icon="logOutOutline" />
+            <span class="signout-label ion-hide-md-down">Sign out</span>
+          </ion-button>
+        </ion-buttons>
       </ion-toolbar>
     </ion-header>
-    <ion-content><div class="wrap"><slot /></div></ion-content>
+    <ion-content><main class="wrap"><slot /></main></ion-content>
     <ion-footer class="ion-hide-lg-up">
-      <ion-toolbar style="--background:#fff;--color:#5B6B8C">
-        <div class="tabs">
-          <ion-button v-for="m in tabs" :key="m.to" fill="clear" :router-link="m.to" :class="{ on: route.path === m.to }" size="small">
-            <div style="display:flex;flex-direction:column;align-items:center"><ion-icon :icon="m.i" /><span>{{ m.t.split(' ')[0] }}</span></div>
+      <ion-toolbar class="tab-toolbar">
+        <nav class="tabs" aria-label="Main navigation">
+          <ion-button v-for="m in tabs" :key="m.to" fill="clear" :router-link="m.to" :class="{ on: isActive(m.to) }" :aria-current="isActive(m.to) ? 'page' : undefined" :aria-label="m.t" size="small">
+            <span class="tab-content">
+              <span class="tab-icon"><ion-icon :icon="m.i" /></span>
+              <span class="tab-label">{{ m.t.split(' ')[0] }}</span>
+              <span class="tab-indicator" aria-hidden="true"></span>
+            </span>
           </ion-button>
-        </div>
+        </nav>
       </ion-toolbar>
     </ion-footer>
   </ion-page>
