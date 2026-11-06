@@ -9,8 +9,8 @@ try {
 }
 
 const api = process.env.VITE_API ?? fileValue;
-if (!api) throw new Error('Set VITE_API to the Cloud Run HTTPS URL in app/.env.android before building Android.');
+if (!api) throw new Error('Set VITE_API to the deployed HTTPS API URL in app/.env.android before building Android.');
 const url = new URL(api);
-if (url.protocol !== 'https:' || /REPLACE|localhost/i.test(url.hostname)) {
-  throw new Error('Android builds require the deployed Cloud Run HTTPS URL in VITE_API.');
+if (url.protocol !== 'https:' || /REPLACE|YOUR|localhost/i.test(url.hostname)) {
+  throw new Error('Android builds require a deployed HTTPS API URL in VITE_API.');
 }

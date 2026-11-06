@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "build:hosting": "vite build --mode hosting",
+    "build:vercel": "vite build --mode vercel",
     "build:android": "node scripts/check-android-env.js && vite build --mode android && cap sync android",
     "preview": "vite preview",
     "cap:sync": "npm run build && cap sync",

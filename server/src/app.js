@@ -17,7 +17,7 @@ export function createApp(corsOrigins = process.env.CORS_ORIGINS || '') {
   app.use(express.json({ limit: '100kb' }));
   app.use('/api', rateLimit({ windowMs: 60e3, limit: 300, standardHeaders: true, legacyHeaders: false }));
   app.use('/api/auth', rateLimit({ windowMs: 15 * 60e3, limit: 40, standardHeaders: true, legacyHeaders: false }));
-  app.get('/uploads/public/:filename', (req, res, next) => {
+  app.get(['/uploads/public/:filename', '/api/uploads/public/:filename'], (req, res, next) => {
     if (path.basename(req.params.filename) !== req.params.filename) return res.status(404).end();
     streamUpload(`public/${req.params.filename}`, res).catch(next);
   });
@@ -35,5 +35,3 @@ export function createApp(corsOrigins = process.env.CORS_ORIGINS || '') {
   });
   return app;
 }
-
-export default createApp();

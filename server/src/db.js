@@ -2,7 +2,21 @@ import admin from 'firebase-admin';
 import crypto from 'crypto';
 
 if (!admin.apps.length) {
-  const options = { credential: admin.credential.applicationDefault() };
+  const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT;
+  let credential = admin.credential.applicationDefault();
+  if (serviceAccountJson) {
+    let serviceAccount;
+    try {
+      serviceAccount = JSON.parse(serviceAccountJson);
+    } catch {
+      throw new Error('FIREBASE_SERVICE_ACCOUNT must contain valid service-account JSON');
+    }
+    if (process.env.FIREBASE_PROJECT_ID && serviceAccount.project_id !== process.env.FIREBASE_PROJECT_ID) {
+      throw new Error('FIREBASE_SERVICE_ACCOUNT project_id must match FIREBASE_PROJECT_ID');
+    }
+    credential = admin.credential.cert(serviceAccount);
+  }
+  const options = { credential };
   if (process.env.FIREBASE_PROJECT_ID) options.projectId = process.env.FIREBASE_PROJECT_ID;
   admin.initializeApp(options);
 }
