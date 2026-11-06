@@ -12,6 +12,7 @@ const payout = (x) => confirm(`Mark ${peso(x.owed)} as paid out to ${x.name}?`) 
 
 <template>
   <Page title="Finance">
+    <div class="card muted">Demo finance only: refunds and payouts update records; no real funds are charged, returned, or transferred.</div>
     <div class="grid"><div class="card"><div class="muted">Booking volume</div><div class="stat">{{ peso(rep.booking_volume) }}</div></div><div class="card"><div class="muted">Commissions</div><div class="stat">{{ peso(rep.commissions) }}</div></div><div class="card"><div class="muted">Platform fees</div><div class="stat">{{ peso(rep.platform_fees) }}</div></div><div class="card"><div class="muted">Subscriptions</div><div class="stat">{{ peso(rep.subscriptions) }}</div></div><div class="card"><div class="muted">Refunds</div><div class="stat">{{ peso(rep.refunds) }}</div></div></div>
     <div class="card scroll-x" style="margin-top:14px"><strong>Pending payouts</strong><p v-if="!payouts.length" class="muted">Nothing owed.</p>
       <table class="t" v-if="payouts.length"><tr><th>Provider</th><th>Jobs</th><th>Owed</th><th></th></tr><tr v-for="x in payouts" :key="x.id"><td>{{ x.name }}</td><td>{{ x.jobs }}</td><td>{{ peso(x.owed) }}</td><td><ion-button size="small" @click="payout(x)">Mark paid</ion-button></td></tr></table></div>

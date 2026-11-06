@@ -6,7 +6,9 @@ import { api, safe, toast, day, statusColor, session } from '../../api';
 const list = ref([]), q = reactive({ role: '', status: '', q: '' }), show = ref(false);
 const PERMS = ['users', 'documents', 'billing', 'finance', 'reports', 'content', 'admins', 'settings'];
 const f = reactive({ name: '', email: '', password: '', role: 'admin', permissions: [] });
-const isSuper = JSON.parse(session.user.permissions || '[]').includes('*');
+const permissions = JSON.parse(session.user.permissions || '[]');
+const isSuper = permissions.includes('*');
+const canCreateAccounts = isSuper || permissions.includes('admins');
 async function load() { list.value = await api('/admin/users?' + new URLSearchParams(Object.entries(q).filter(([, v]) => v))); }
 onIonViewWillEnter(load);
 const setStatus = (u, status) => { const reason = status === 'active' ? '' : prompt('Reason (shown to the user)') ?? null; if (reason === null) return; safe(async () => { await api('/admin/users/' + u.id, { method: 'PATCH', body: { status, reason } }); load(); }); };
@@ -16,7 +18,7 @@ const setPerms = (u) => { const cur = JSON.parse(u.permissions || '[]'); const v
 
 <template>
   <Page title="Users">
-    <template #actions><ion-button @click="show = !show">New account</ion-button></template>
+    <template #actions><ion-button v-if="canCreateAccounts" @click="show = !show">New account</ion-button></template>
     <form class="card" v-if="show" @submit.prevent="create" style="margin-bottom:16px">
       <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))">
         <div class="field"><label>Name</label><input v-model="f.name" required /></div><div class="field"><label>Email</label><input type="email" v-model="f.email" required /></div>
@@ -34,7 +36,7 @@ const setPerms = (u) => { const cur = JSON.parse(u.permissions || '[]'); const v
     </form>
     <div class="card scroll-x"><table class="t"><tr><th>Name</th><th>Role</th><th>Status</th><th>Joined</th><th></th></tr>
       <tr v-for="u in list" :key="u.id"><td><strong>{{ u.name }}</strong><div class="muted">{{ u.email }}</div></td><td>{{ u.role }}<span class="muted" v-if="u.shop_id"> (staff)</span></td><td><span class="badge" :class="statusColor(u.status)">{{ u.status }}</span></td><td>{{ day(u.created_at) }}</td>
-        <td><template v-if="u.id !== session.user.id"><ion-button size="small" fill="outline" v-if="u.status !== 'suspended'" color="danger" @click="setStatus(u, 'suspended')">Suspend</ion-button><ion-button size="small" fill="outline" v-else @click="setStatus(u, 'active')">Reactivate</ion-button>
+        <td><template v-if="u.id !== session.user.id"><ion-button size="small" fill="outline" v-if="u.status === 'active'" color="danger" @click="setStatus(u, 'suspended')">Suspend</ion-button><ion-button size="small" fill="outline" v-else @click="setStatus(u, 'active')">Reactivate</ion-button>
           <ion-button size="small" fill="clear" color="danger" v-if="u.status !== 'deleted'" @click="setStatus(u, 'deleted')">Delete</ion-button><ion-button size="small" fill="clear" v-if="isSuper && u.role === 'admin'" @click="setPerms(u)">Permissions</ion-button></template></td></tr></table></div>
   </Page>
 </template>

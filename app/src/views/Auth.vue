@@ -1,29 +1,86 @@
 <script setup>
 import { ref, reactive, computed } from 'vue';
 import { useRouter } from 'vue-router';
-import { api, safe, setSession, toast } from '../api';
+import { createUserWithEmailAndPassword, sendEmailVerification, sendPasswordResetEmail, signInWithEmailAndPassword, updateProfile } from 'firebase/auth';
+import { api, clearSessionCache, safe, setSession, toast } from '../api';
+import { firebaseAuth } from '../firebase';
 import { constructOutline, shieldCheckmarkOutline, timeOutline } from 'ionicons/icons';
 const router = useRouter();
-const mode = ref('login'); // login | register | verify | forgot | reset
-const f = reactive({ role: 'client', name: '', email: '', phone: '', password: '', businessName: '', city: '', code: '' });
+const mode = ref('login');
+const f = reactive({ role: 'client', name: '', email: '', phone: '', password: '', businessName: '', city: '' });
 const busy = ref(false);
-const titles = { login: 'Welcome back', register: 'Create your account', verify: 'Verify your email', forgot: 'Reset password', reset: 'Choose a new password' };
+const titles = { login: 'Welcome back', register: 'Create your account', verify: 'Verify your email', forgot: 'Reset password' };
 const strength = computed(() => [/.{10,}/, /[a-z]/, /[A-Z]/, /\d/].filter((r) => r.test(f.password)).length);
 async function run(fn) { busy.value = true; await safe(fn); busy.value = false; }
 
+async function finishLogin(user) {
+  const token = await user.getIdToken(true);
+  const account = await api('/auth/me');
+  await setSession(token, account);
+  router.replace('/dashboard');
+}
 const login = () => run(async () => {
-  try { const r = await api('/auth/login', { method: 'POST', body: { email: f.email, password: f.password } }); setSession(r.token, r.user); router.replace('/dashboard'); }
-  catch (e) { if (e.data?.needsVerify) { mode.value = 'verify'; toast('Enter the code we sent you'); } else throw e; }
+  const credential = await signInWithEmailAndPassword(firebaseAuth, f.email.trim(), f.password);
+  await credential.user.reload();
+  if (!credential.user.emailVerified) {
+    clearSessionCache();
+    mode.value = 'verify';
+    toast('Verify your email using the link we sent before signing in.');
+    return;
+  }
+  await finishLogin(credential.user);
 });
 const register = () => run(async () => {
-  const body = { role: f.role, name: f.name, email: f.email, password: f.password, phone: f.phone || undefined, city: f.city || undefined, businessName: f.role === 'shop' ? f.businessName : undefined };
-  await api('/auth/register', { method: 'POST', body }); mode.value = 'verify'; toast('Check your email for a 6-digit code');
+  if (strength.value !== 4) throw new Error('Use at least 10 characters with an uppercase letter, a lowercase letter, and a number.');
+  let user = firebaseAuth.currentUser;
+  if (!user || user.email !== f.email.trim()) {
+    user = (await createUserWithEmailAndPassword(firebaseAuth, f.email.trim(), f.password)).user;
+  }
+  if (user.displayName !== f.name) await updateProfile(user, { displayName: f.name });
+  await api('/auth/register', { method: 'POST', body: {
+    role: f.role, name: f.name, phone: f.phone || undefined, city: f.city || undefined,
+    businessName: f.role === 'shop' ? f.businessName : undefined,
+  } });
+  await user.reload();
+  if (!user.emailVerified) await sendEmailVerification(user);
+  clearSessionCache();
+  mode.value = 'verify';
+  toast('Check your email and open the verification link to activate your account.');
 });
-const verify = () => run(async () => { const r = await api('/auth/verify', { method: 'POST', body: { email: f.email, code: f.code } }); toast(r.message); f.code = ''; mode.value = 'login'; });
-const resend = () => run(async () => toast((await api('/auth/resend', { method: 'POST', body: { email: f.email } })).message));
-const forgot = () => run(async () => { toast((await api('/auth/forgot', { method: 'POST', body: { email: f.email } })).message); mode.value = 'reset'; });
-const reset = () => run(async () => { toast((await api('/auth/reset', { method: 'POST', body: { email: f.email, code: f.code, password: f.password } })).message); mode.value = 'login'; });
-const submit = () => ({ login, register, verify, forgot, reset }[mode.value])();
+const verify = () => run(async () => {
+  const user = firebaseAuth.currentUser;
+  if (!user) {
+    mode.value = 'login';
+    toast('Sign in after opening the Firebase verification link.');
+    return;
+  }
+  await user.reload();
+  if (!user.emailVerified) {
+    toast('Your email is not verified yet. Open the link in your inbox.');
+    return;
+  }
+  await finishLogin(user);
+});
+const resend = () => run(async () => {
+  const user = firebaseAuth.currentUser;
+  if (!user || user.email !== f.email.trim()) {
+    mode.value = 'login';
+    toast('Sign in with this email to request a new verification link.');
+    return;
+  }
+  await sendEmailVerification(user);
+  toast('A new verification link was sent.');
+});
+const forgot = () => run(async () => {
+  try {
+    await sendPasswordResetEmail(firebaseAuth, f.email.trim());
+  } catch (error) {
+    if (error.code !== 'auth/user-not-found') throw error;
+  }
+  toast('If an account exists for that email, a password reset link was sent.');
+  mode.value = 'login';
+});
+const submit = () => ({ login, register, verify, forgot }[mode.value])();
 </script>
 
 <template>
@@ -55,7 +112,7 @@ const submit = () => ({ login, register, verify, forgot, reset }[mode.value])();
           <div class="panel-inner">
           <div class="panel-kicker">{{ mode === 'login' ? 'YOUR REPAIR JOURNEY STARTS HERE' : 'A FEW DETAILS AND YOU’RE SET' }}</div>
           <h2>{{ titles[mode] }}</h2>
-          <p class="panel-intro">{{ mode === 'login' ? 'Sign in to manage bookings, message your fixer, and keep track of every repair.' : 'Enter your details below to continue securely.' }}</p>
+          <p class="panel-intro">{{ mode === 'login' ? 'Sign in to manage bookings, message your fixer, and keep track of every repair.' : mode === 'verify' ? 'Open the verification link from Firebase in your email, then continue.' : 'Enter your details below to continue securely.' }}</p>
           <form @submit.prevent="submit" autocomplete="on">
             <div v-if="mode === 'register'">
               <div class="field"><label>I am a</label>
@@ -65,15 +122,15 @@ const submit = () => ({ login, register, verify, forgot, reset }[mode.value])();
               <div class="field"><label>Phone</label><input v-model="f.phone" type="tel" autocomplete="tel" /></div>
               <div class="field"><label>City</label><input v-model="f.city" autocomplete="address-level2" /></div>
             </div>
-            <div class="field"><label>Email</label><input v-model="f.email" type="email" required autocomplete="email" /></div>
-            <div class="field" v-if="['login', 'register', 'reset'].includes(mode)">
-              <label>{{ mode === 'reset' ? 'New password' : 'Password' }}</label>
+            <div class="field" v-if="mode !== 'verify'"><label>Email</label><input v-model="f.email" type="email" required autocomplete="email" /></div>
+            <div class="field" v-if="['login', 'register'].includes(mode)">
+              <label>Password</label>
               <input v-model="f.password" type="password" required :autocomplete="mode === 'login' ? 'current-password' : 'new-password'" />
               <div v-if="mode !== 'login'" class="muted">At least 10 characters with upper case, lower case and a number. Strength {{ strength }}/4</div>
             </div>
-            <div class="field" v-if="['verify', 'reset'].includes(mode)"><label>6-digit code</label><input v-model="f.code" inputmode="numeric" maxlength="6" required autocomplete="one-time-code" /></div>
-            <ion-button type="submit" expand="block" :disabled="busy">{{ { login: 'Sign in', register: 'Create account', verify: 'Verify email', forgot: 'Send reset code', reset: 'Save new password' }[mode] }}</ion-button>
+            <ion-button v-if="mode !== 'verify'" type="submit" expand="block" :disabled="busy">{{ { login: 'Sign in', register: 'Create account', forgot: 'Send reset link' }[mode] }}</ion-button>
           </form>
+          <ion-button v-if="mode === 'verify'" expand="block" :disabled="busy" @click="verify">I verified my email</ion-button>
           <div class="links">
             <template v-if="mode === 'login'"><a @click="mode = 'register'">Create an account</a><a @click="mode = 'forgot'">Forgot password?</a></template>
             <template v-else><a @click="mode = 'login'">Back to sign in</a><a v-if="mode === 'verify'" @click="resend">Send a new code</a></template>

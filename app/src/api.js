@@ -1,24 +1,49 @@
 import { reactive } from 'vue';
 import { toastController } from '@ionic/vue';
+import { signOut } from 'firebase/auth';
+import { firebaseAuth, firebaseAuthReady } from './firebase';
 
-export const BASE = import.meta.env.VITE_API || 'http://localhost:4000';
-// NOTE: for the native app store the token with @capacitor/preferences (secure storage) instead of localStorage.
-export const session = reactive({ token: localStorage.getItem('fx_token'), user: JSON.parse(localStorage.getItem('fx_user') || 'null') });
+export const BASE = import.meta.env.VITE_API ?? (import.meta.env.DEV ? 'http://localhost:4000' : '');
+export const session = reactive({ token: null, user: null });
 
-export function setSession(token, user) {
+export async function loadSession() {
+  await firebaseAuthReady;
+  await firebaseAuth.authStateReady();
+  const user = firebaseAuth.currentUser;
+  if (!user) return;
+  await user.reload();
+  if (!user.emailVerified) return;
+  try {
+    session.token = await user.getIdToken(true);
+    session.user = await api('/auth/me');
+  } catch (error) {
+    clearSessionCache();
+    throw error;
+  }
+}
+
+export async function setSession(token, user) {
   session.token = token; session.user = user;
-  if (token) { localStorage.setItem('fx_token', token); localStorage.setItem('fx_user', JSON.stringify(user)); }
-  else { localStorage.removeItem('fx_token'); localStorage.removeItem('fx_user'); }
+  if (!token && firebaseAuth.currentUser) {
+    await signOut(firebaseAuth);
+  }
+}
+
+export function clearSessionCache() {
+  session.token = null;
+  session.user = null;
 }
 export async function toast(message, color = 'primary') { (await toastController.create({ message, duration: 2500, color, position: 'top' })).present(); }
 
 export async function api(path, { method = 'GET', body, form } = {}) {
   const headers = {};
-  if (session.token) headers.Authorization = 'Bearer ' + session.token;
+  await firebaseAuthReady;
+  const token = firebaseAuth.currentUser ? await firebaseAuth.currentUser.getIdToken() : session.token;
+  if (token) headers.Authorization = 'Bearer ' + token;
   if (body) headers['Content-Type'] = 'application/json';
   const res = await fetch(BASE + '/api' + path, { method, headers, body: form || (body ? JSON.stringify(body) : undefined) });
   const data = await res.json().catch(() => ({}));
-  if (res.status === 401 && session.token) { setSession(null, null); location.href = '/login'; }
+  if (res.status === 401 && token) { await setSession(null, null); location.href = '/login'; }
   if (!res.ok) { const e = new Error(data.error || 'Request failed'); e.data = data; throw e; }
   return data;
 }

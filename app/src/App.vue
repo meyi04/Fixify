@@ -1,12 +1,18 @@
 <script setup>
 import { computed } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
-import { session, setSession, img, api } from './api';
+import { session, setSession, img } from './api';
 import { menus } from './nav';
 import { logOutOutline, personOutline } from 'ionicons/icons';
 const router = useRouter(), route = useRoute();
-const items = computed(() => (menus[session.user?.role] || []).filter((m) => m.to !== '/profile'));
-async function logout() { try { await api('/auth/logout-all', { method: 'POST' }); } catch {} setSession(null, null); router.replace('/login'); }
+const items = computed(() => {
+  const entries = (menus[session.user?.role] || []).filter((item) => item.to !== '/profile');
+  if (session.user?.role !== 'admin') return entries;
+  let permissions = [];
+  try { permissions = JSON.parse(session.user.permissions || '[]'); } catch {}
+  return entries.filter((item) => !item.permission || permissions.includes('*') || permissions.includes(item.permission));
+});
+async function logout() { await setSession(null, null); router.replace('/login'); }
 </script>
 
 <template>

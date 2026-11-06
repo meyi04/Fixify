@@ -11,7 +11,15 @@ async function open(id) {
   current.value = id; convo.value = await api('/messages/' + id); await nextTick();
   const el = document.getElementById('msgs'); if (el) el.scrollTop = el.scrollHeight;
 }
-async function send() { if (!text.value.trim()) return; await safe(() => api('/messages', { method: 'POST', body: { to: current.value, body: text.value } })); text.value = ''; await open(current.value); loadThreads(); }
+async function send() {
+  const body = text.value.trim();
+  if (!body) return;
+  const sent = await safe(() => api('/messages', { method: 'POST', body: { to: current.value, body } }));
+  if (!sent) return;
+  text.value = '';
+  await open(current.value);
+  loadThreads();
+}
 onIonViewWillEnter(async () => {
   await loadThreads(); if (route.query.to) await open(+route.query.to);
   timer = setInterval(async () => { loadThreads(); if (current.value) { const c = await api('/messages/' + current.value); if (c.messages.length !== convo.value.messages.length) open(current.value); } }, 5000); // simple polling; swap for WebSocket/SSE later

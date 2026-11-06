@@ -11,7 +11,7 @@ async function load() {
   if (!session.user.shop_id) plans.value = await api('/plans');
 }
 onIonViewWillEnter(load);
-const buy = (p) => confirm(`Subscribe to ${p.name} for ${peso(p.price)}?`) && safe(async () => { await api('/subscribe', { method: 'POST', body: { planId: p.id } }); toast('Subscription active'); load(); });
+const buy = (p) => confirm(`Activate ${p.name} for ${peso(p.price)} in demo mode? No money will be charged.`) && safe(async () => { await api('/subscribe', { method: 'POST', body: { planId: p.id } }); toast('Demo subscription active (no charge)'); load(); });
 const months = () => Object.entries(e.value?.byMonth || {}).sort();
 const max = () => Math.max(1, ...months().map(([, v]) => v));
 </script>
@@ -19,12 +19,14 @@ const max = () => Math.max(1, ...months().map(([, v]) => v));
 <template>
   <Page :title="role === 'client' ? 'Payments & warranties' : 'Earnings & subscription'">
     <template v-if="role === 'client'">
+      <div class="card muted">Demo payment mode: recording a payment does not charge or transfer real money.</div>
       <div class="card"><strong>Payment history</strong><p v-if="!pays.length" class="muted">No payments yet.</p>
         <div class="row sb" v-for="p in pays" :key="p.id" style="margin-top:8px"><span>#{{ p.booking_id }} {{ p.device }} <span class="muted">{{ fmt(p.created_at) }}</span></span><span><span class="badge" :class="statusColor(p.status)">{{ p.status }}</span> <strong>{{ peso(p.amount) }}</strong></span></div></div>
       <div class="card" style="margin-top:14px"><strong>Warranties</strong><p v-if="!warranties.length" class="muted">No warranties yet.</p>
         <div class="row sb" v-for="w in warranties" :key="w.id" style="margin-top:8px"><span>{{ w.device }} · {{ w.provider_label }}</span><span class="badge" :class="w.warranty_until * 1000 > Date.now() ? 'green' : 'red'">{{ w.warranty_until * 1000 > Date.now() ? 'Valid until ' : 'Expired ' }}{{ day(w.warranty_until) }}</span></div></div>
     </template>
     <template v-else-if="e">
+      <div class="card muted" v-if="isProv">Demo mode: subscriptions are activated without a real charge; earnings and payouts are records only.</div>
       <div class="grid"><div class="card"><div class="muted">Net earnings</div><div class="stat">{{ peso(e.net) }}</div></div><div class="card"><div class="muted">Gross</div><div class="stat">{{ peso(e.gross) }}</div></div><div class="card"><div class="muted">Commission paid</div><div class="stat">{{ peso(e.commission) }}</div></div>
         <div class="card" v-if="!session.user.shop_id"><div class="muted">Subscription</div><div class="stat">{{ sub ? 'Active' : 'Inactive' }}</div><div class="muted" v-if="sub">Renews {{ day(sub.expires_at) }} · {{ sub.commission_pct }}% commission</div></div></div>
       <div class="card" style="margin-top:14px" v-if="months().length"><strong>Net by month</strong><div class="bars" style="margin-top:12px"><div v-for="[k, v] in months()" :key="k" :style="{ height: (v / max()) * 100 + '%' }" :title="peso(v)"><span>{{ k.slice(5) }}</span></div></div></div>

@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { session, img, api, setSession } from '../api';
+import { session, img, setSession } from '../api';
 import { menus } from '../nav';
 import { calendarClearOutline, constructOutline, logOutOutline, personOutline } from 'ionicons/icons';
 defineProps({ title: String });
@@ -13,7 +13,13 @@ const roleLabel = computed(() => ({
   technician: 'Technician',
   admin: 'Administration',
 }[session.user?.role] || 'Workspace'));
-const navItems = computed(() => menus[session.user?.role] || []);
+const navItems = computed(() => {
+  const items = menus[session.user?.role] || [];
+  if (session.user?.role !== 'admin') return items;
+  let permissions = [];
+  try { permissions = JSON.parse(session.user.permissions || '[]'); } catch {}
+  return items.filter((item) => !item.permission || permissions.includes('*') || permissions.includes(item.permission));
+});
 const currentItem = computed(() => navItems.value.find((item) => route.path === item.to
   || (item.to !== '/dashboard' && route.path.startsWith(item.to + '/'))
   || (item.to === '/browse' && route.path.startsWith('/provider/'))));
@@ -22,8 +28,7 @@ const isActive = (path) => route.path === path
   || (path !== '/dashboard' && route.path.startsWith(path + '/'))
   || (path === '/browse' && route.path.startsWith('/provider/'));
 async function logout() {
-  try { await api('/auth/logout-all', { method: 'POST' }); } catch {}
-  setSession(null, null);
+  await setSession(null, null);
   router.replace('/login');
 }
 </script>
