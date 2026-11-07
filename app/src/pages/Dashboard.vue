@@ -2,7 +2,7 @@
 import { ref } from 'vue';
 import { onIonViewWillEnter } from '@ionic/vue';
 import Page from '../views/Page.vue';
-import { api, session } from '../api';
+import { api, peso, session } from '../api';
 const d = ref({ cards: [] }), ann = ref([]);
 const max = () => Math.max(1, ...(d.value.chart || []).map((x) => x.value));
 onIonViewWillEnter(async () => { d.value = await api('/dashboard'); ann.value = await api('/announcements'); });
@@ -17,7 +17,7 @@ onIonViewWillEnter(async () => { d.value = await api('/dashboard'); ann.value = 
     </section>
     <div class="row sb" style="margin:0 2px 12px"><strong style="color:var(--fx-navy);font-size:15px">Your overview</strong><span class="muted">A snapshot of your activity</span></div>
     <div class="grid">
-      <div class="card" v-for="c in d.cards" :key="c.label"><div class="muted">{{ c.label }}</div><div class="stat">{{ c.value }}</div></div>
+      <div class="card" v-for="c in d.cards" :key="c.label"><div class="muted">{{ c.label }}</div><div class="stat">{{ c.label === 'Net earnings' ? peso(c.value) : c.value }}</div></div>
     </div>
     <div class="card" v-if="d.chart?.length" style="margin-top:16px">
       <strong>{{ d.chartTitle }}</strong>

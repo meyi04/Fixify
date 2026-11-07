@@ -1,10 +1,35 @@
-import { reactive } from 'vue';
-import { toastController } from '@ionic/vue';
+import { reactive, ref } from 'vue';
+import { alertController, toastController } from '@ionic/vue';
 import { signOut } from 'firebase/auth';
 import { firebaseAuth, firebaseAuthReady } from './firebase';
 
 export const BASE = import.meta.env.VITE_API ?? (import.meta.env.DEV ? 'http://localhost:4000' : '');
 export const session = reactive({ token: null, user: null });
+export const unreadNotifications = ref(0);
+
+export async function confirmLogout() {
+  const alert = await alertController.create({
+    header: 'Log out?',
+    message: 'Are you sure you want to log out?',
+    buttons: [
+      { text: 'Cancel', role: 'cancel' },
+      { text: 'Log out', role: 'destructive' },
+    ],
+  });
+  await alert.present();
+  const { role } = await alert.onDidDismiss();
+  return role === 'destructive';
+}
+
+export async function refreshUnreadNotifications() {
+  if (!session.token) {
+    unreadNotifications.value = 0;
+    return 0;
+  }
+  const notifications = await api('/notifications');
+  unreadNotifications.value = notifications.filter((notification) => !notification.read).length;
+  return unreadNotifications.value;
+}
 
 export async function loadSession() {
   await firebaseAuthReady;

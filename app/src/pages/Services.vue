@@ -20,7 +20,7 @@ const del = (s) => confirm('Delete this service?') && safe(async () => { await a
 
 <template>
   <Page title="Services & prices">
-    <template #actions><ion-button v-if="!readOnly" @click="startEdit(null)">Add service</ion-button></template>
+    <div v-if="!readOnly" class="row" style="margin-bottom:14px"><ion-button @click="startEdit(null)">Add service</ion-button></div>
     <form class="card" v-if="edit" @submit.prevent="save" style="margin-bottom:16px">
       <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
         <div class="field"><label>Title</label><input v-model="f.title" required /></div>

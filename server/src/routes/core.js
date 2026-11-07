@@ -2,7 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import path from 'path';
 import { z } from 'zod';
-import { auth as firebaseAuth, create, createAuthUser, createUnique, deleteUpload, get, list, MAX_UPLOAD_BYTES, recordDemoBookingPayment, remove, saveUpload, setting, streamUpload, update } from '../db.js';
+import { auth as firebaseAuth, completeBookingWithPayment, create, createAuthUser, createUnique, deleteUpload, get, list, MAX_UPLOAD_BYTES, remove, saveUpload, setting, streamUpload, update, updateMany } from '../db.js';
 import { auth, role, validate, audit, notify } from '../mw.js';
 
 const r = Router();
@@ -309,7 +309,7 @@ r.post('/bookings', auth, role('client'), validate(z.object({
 });
 
 const actionSchema = z.object({
-  action: z.enum(['accept', 'reject', 'reschedule', 'assign', 'start', 'update', 'complete', 'cancel', 'pay']),
+  action: z.enum(['accept', 'reject', 'reschedule', 'assign', 'start', 'update', 'complete', 'cancel']),
   scheduledAt: z.number().int().optional(), technicianId: z.number().int().nullable().optional(),
   estimate: z.number().min(0).optional(), parts: z.array(z.object({ name: z.string().max(80), cost: z.number().min(0) })).max(30).optional(),
   note: z.string().max(500).optional(), result: z.string().max(1000).optional(),
@@ -371,9 +371,21 @@ r.post('/bookings/:id/action', auth, validate(actionSchema), async (req, res) =>
       const total = a.total ?? b.estimate;
       if (total == null) return fail('Enter the final total');
       const days = a.warrantyDays ?? 0;
-      await save({ status: 'completed', total, result: a.result ?? null, warranty_days: days,
-        warranty_until: days ? now() + days * 86400 : null, progress: progress('Repair completed') });
-      await notify(b.client_id, 'Repair completed', `Total ₱${total}. Record a demo payment and rate the service.`);
+      const sub = await activeSub(b.provider_id);
+      const pct = sub?.commission_pct ?? +(await setting('default_commission_pct', '10'));
+      const feePct = +(await setting('platform_fee_pct', '2'));
+      const fee = +(total * feePct / 100).toFixed(2);
+      const completedAt = now();
+      const recorded = await completeBookingWithPayment(b.id, {
+        status: 'completed', total, result: a.result ?? null, warranty_days: days,
+        warranty_until: days ? completedAt + days * 86400 : null, progress: progress('Repair completed'),
+      }, {
+        kind: 'booking', booking_id: b.id, payer_id: b.client_id, provider_id: b.provider_id,
+        amount: total + fee, platform_fee: fee, commission: +(total * pct / 100).toFixed(2),
+        status: 'paid', payment_mode: 'demo', payout_status: 'pending', created_at: completedAt,
+      });
+      if (!recorded) return fail('This booking is no longer in progress');
+      await notify(b.client_id, 'Repair completed', `Total ₱${total} recorded as paid. This is a demo record; no real payment was charged. You can now rate the service.`);
       break;
     }
     case 'cancel':
@@ -382,22 +394,6 @@ r.post('/bookings/:id/action', auth, validate(actionSchema), async (req, res) =>
       await save({ status: 'cancelled', progress: progress('Cancelled by client') });
       await notify(b.provider_id, 'Booking cancelled', `Booking #${b.id}`);
       break;
-    case 'pay': {
-      if (!isClient) return fail('Only the client can pay', 403);
-      if (b.status !== 'completed' || b.payment_status !== 'unpaid') return fail('Nothing to pay');
-      const sub = await activeSub(b.provider_id);
-      const pct = sub?.commission_pct ?? +(await setting('default_commission_pct', '10'));
-      const feePct = +(await setting('platform_fee_pct', '2'));
-      const fee = +(b.total * feePct / 100).toFixed(2);
-      const recorded = await recordDemoBookingPayment(b.id, {
-        kind: 'booking', booking_id: b.id, payer_id: u.id, provider_id: b.provider_id,
-        amount: b.total + fee, platform_fee: fee, commission: +(b.total * pct / 100).toFixed(2),
-        status: 'paid', payment_mode: 'demo', payout_status: 'pending', created_at: now(),
-      });
-      if (!recorded) return fail('This booking is no longer payable');
-      await notify(b.provider_id, 'Payment received', `Booking #${b.id}: ₱${b.total}`);
-      break;
-    }
   }
   await audit(req, 'booking.' + a.action, `booking:${b.id}`);
   res.json(await enrichBooking({ ...b, ...await get('bookings', b.id) }));
@@ -443,6 +439,12 @@ r.post('/notifications/read', auth, async (req, res) => {
   await updateMany('notifications', [['user_id', '==', req.user.id]], { read: true });
   res.json({ ok: true });
 });
+r.patch('/notifications/:id', auth, validate(z.object({ read: z.boolean() })), async (req, res) => {
+  const notification = await get('notifications', req.params.id);
+  if (!notification || notification.user_id !== req.user.id) return res.status(404).json({ error: 'Notification not found' });
+  await update('notifications', notification.id, { read: req.body.read });
+  res.json({ ok: true });
+});
 r.post('/reviews', auth, role('client'), validate(z.object({ bookingId: z.number().int(), rating: z.number().int().min(1).max(5), comment: z.string().max(1000).optional() })), async (req, res) => {
   const booking = await get('bookings', req.body.bookingId);
   if (!booking || booking.client_id !== req.user.id || booking.status !== 'completed') return res.status(400).json({ error: 'Only completed bookings can be rated' });
@@ -481,12 +483,64 @@ r.post('/subscribe', auth, role('shop', 'technician'), validate(z.object({ planI
   res.json({ ok: true });
 });
 r.get('/earnings', auth, role('shop', 'technician'), async (req, res) => {
-  const rows = (await by('payments', 'provider_id', ownerOf(req.user))).filter((x) => x.kind === 'booking').sort((a, b) => b.id - a.id);
-  const bookings = await list('bookings'), payments = rows.map((p) => ({ ...p, device: byId(bookings, p.booking_id)?.device }));
-  const paid = payments.filter((x) => x.status === 'paid'), gross = paid.reduce((s, x) => s + x.amount - x.platform_fee, 0), commission = paid.reduce((s, x) => s + x.commission, 0);
+  const providerId = ownerOf(req.user);
+  const bookingsBeforeSync = await by('bookings', 'provider_id', providerId);
+  const completedWithoutPayment = bookingsBeforeSync.filter((booking) => booking.status === 'completed'
+    && booking.payment_status !== 'refunded' && Number.isFinite(booking.total));
+  let commissionPct, feePct;
+  if (completedWithoutPayment.length) {
+    const sub = await activeSub(providerId);
+    commissionPct = sub?.commission_pct ?? +(await setting('default_commission_pct', '10'));
+    feePct = +(await setting('platform_fee_pct', '2'));
+  }
+  await Promise.all(completedWithoutPayment.map(async (booking) => {
+    const platformFee = +(booking.total * feePct / 100).toFixed(2);
+    const completedAt = booking.updated_at || booking.created_at || now();
+    await completeBookingWithPayment(booking.id, {}, {
+      kind: 'booking', booking_id: booking.id, payer_id: booking.client_id, provider_id: providerId,
+      amount: booking.total + platformFee, platform_fee: platformFee,
+      commission: +(booking.total * commissionPct / 100).toFixed(2),
+      status: 'paid', payment_mode: 'demo', payout_status: 'pending', created_at: completedAt,
+    });
+  }));
+  const [rows, allBookings] = await Promise.all([
+    by('payments', 'provider_id', providerId),
+    list('bookings'),
+  ]);
+  const bookings = allBookings.filter((booking) => booking.provider_id === providerId
+    && booking.status === 'completed' && booking.payment_status !== 'refunded'
+    && Number.isFinite(booking.total));
+  const bookingPayments = new Map(rows.filter((payment) => payment.kind === 'booking')
+    .map((payment) => [payment.booking_id, payment]));
+  const needsCalculatedPayment = bookings.some((booking) => !bookingPayments.has(booking.id));
+  if (needsCalculatedPayment && commissionPct === undefined) {
+    const sub = await activeSub(providerId);
+    commissionPct = sub?.commission_pct ?? +(await setting('default_commission_pct', '10'));
+    feePct = +(await setting('platform_fee_pct', '2'));
+  }
+  const payments = bookings.flatMap((booking) => {
+    const payment = bookingPayments.get(booking.id);
+    if (payment?.status === 'refunded') return [];
+    if (payment) return [{ ...payment, device: booking.device }];
+    const platformFee = +(booking.total * feePct / 100).toFixed(2);
+    return [{
+      id: `booking-${booking.id}`, booking_id: booking.id, device: booking.device,
+      amount: booking.total + platformFee, platform_fee: platformFee,
+      commission: +(booking.total * commissionPct / 100).toFixed(2),
+      status: 'paid', payout_status: 'pending', created_at: booking.updated_at || booking.created_at || now(),
+    }];
+  }).sort((a, b) => b.created_at - a.created_at);
+  const gross = payments.reduce((sum, payment) => sum + payment.amount - payment.platform_fee, 0);
+  const commission = payments.reduce((sum, payment) => sum + payment.commission, 0);
+  const awaitingPayment = allBookings
+    .filter((b) => b.provider_id === ownerOf(req.user) && b.status === 'completed' && b.payment_status === 'unpaid')
+    .map(({ id, device, total }) => ({ booking_id: id, device, amount: total }));
   const byMonth = {};
-  paid.forEach((x) => { const key = new Date(x.created_at * 1000).toISOString().slice(0, 7); byMonth[key] = (byMonth[key] || 0) + x.amount - x.platform_fee - x.commission; });
-  res.json({ gross, commission, net: gross - commission, byMonth, payments });
+  payments.filter((payment) => payment.status === 'paid').forEach((payment) => {
+    const key = new Date(payment.created_at * 1000).toISOString().slice(0, 7);
+    byMonth[key] = (byMonth[key] || 0) + payment.amount - payment.platform_fee - payment.commission;
+  });
+  res.json({ gross, commission, net: gross - commission, byMonth, payments, awaitingPayment });
 });
 r.get('/payments', auth, role('client'), async (req, res) => {
   const [payments, bookings] = await Promise.all([by('payments', 'payer_id', req.user.id), list('bookings')]);
@@ -539,15 +593,19 @@ r.get('/dashboard', auth, async (req, res) => {
     if (can('finance')) cards.push({ label: 'Platform revenue (₱)', value: Math.round(revenue.reduce((sum, item) => sum + item.value, 0)) });
     return res.json({ cards, ...(can('finance') ? { chart: revenue, chartTitle: 'Platform revenue by month' } : {}) });
   }
-  const [bookings, reviews] = await Promise.all([
+  const [bookings, reviews, payments] = await Promise.all([
     by('bookings', u.shop_id ? 'technician_id' : 'provider_id', u.shop_id ? u.id : id),
     by('reviews', 'provider_id', id),
+    by('payments', 'provider_id', id),
   ]);
+  const paidBookings = payments.filter((payment) => payment.kind === 'booking' && payment.status === 'paid');
+  const netEarnings = paidBookings.reduce((sum, payment) => sum + payment.amount - payment.platform_fee - payment.commission, 0);
   const sub = u.shop_id ? null : await activeSub(id);
   return res.json({ cards: [
     { label: 'New requests', value: bookings.filter((b) => b.status === 'requested').length },
     { label: 'In progress', value: bookings.filter((b) => ['accepted', 'in_progress'].includes(b.status)).length },
     { label: 'Completed', value: bookings.filter((b) => b.status === 'completed').length },
+    ...(u.role === 'shop' ? [{ label: 'Net earnings', value: +netEarnings.toFixed(2) }] : []),
     { label: 'Rating', value: reviews.length ? +(reviews.reduce((sum, x) => sum + x.rating, 0) / reviews.length).toFixed(1) : '—' },
     ...(u.shop_id ? [] : [{ label: 'Subscription', value: sub ? 'Active' : 'Inactive' }, { label: 'Verification', value: await approved(u.id) ? 'Approved' : 'Pending' }]),
   ] });

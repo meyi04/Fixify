@@ -17,6 +17,7 @@ const routes = [
   { path: '/notifications', component: lazy('Notifications') },
   { path: '/bookings', component: lazy('Bookings') },
   { path: '/money', component: lazy('Money'), meta: { roles: ['client', 'shop', 'technician'] } },
+  { path: '/reports', component: lazy('ShopReports'), meta: { roles: ['shop'] } },
   { path: '/browse', component: lazy('Browse'), meta: { roles: ['client'] } },
   { path: '/provider/:id', component: lazy('Provider'), meta: { roles: ['client'] } },
   { path: '/services', component: lazy('Services'), meta: { roles: P } },

@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { session, img, setSession } from '../api';
+import { session, img, setSession, confirmLogout, unreadNotifications } from '../api';
 import { menus } from '../nav';
 import { calendarClearOutline, constructOutline, logOutOutline, personOutline } from 'ionicons/icons';
 defineProps({ title: String });
@@ -28,6 +28,7 @@ const isActive = (path) => route.path === path
   || (path !== '/dashboard' && route.path.startsWith(path + '/'))
   || (path === '/browse' && route.path.startsWith('/provider/'));
 async function logout() {
+  if (!await confirmLogout()) return;
   await setSession(null, null);
   router.replace('/login');
 }
@@ -70,9 +71,9 @@ async function logout() {
     <ion-footer class="ion-hide-lg-up">
       <ion-toolbar class="tab-toolbar">
         <nav class="tabs" aria-label="Main navigation">
-          <ion-button v-for="m in tabs" :key="m.to" fill="clear" :router-link="m.to" :class="{ on: isActive(m.to) }" :aria-current="isActive(m.to) ? 'page' : undefined" :aria-label="m.t" size="small">
+          <ion-button v-for="m in tabs" :key="m.to" fill="clear" :router-link="m.to" :class="{ on: isActive(m.to) }" :aria-current="isActive(m.to) ? 'page' : undefined" :aria-label="m.to === '/notifications' && unreadNotifications ? `${m.t}, ${unreadNotifications} unread` : m.t" size="small">
             <span class="tab-content">
-              <span class="tab-icon"><ion-icon :icon="m.i" /></span>
+              <span class="tab-icon"><ion-icon :icon="m.i" /><span v-if="m.to === '/notifications' && unreadNotifications" class="notification-dot">{{ unreadNotifications > 9 ? '9+' : unreadNotifications }}</span></span>
               <span class="tab-label">{{ m.t.split(' ')[0] }}</span>
               <span class="tab-indicator" aria-hidden="true"></span>
             </span>

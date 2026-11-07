@@ -1,10 +1,11 @@
 <script setup>
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { onIonViewWillEnter } from '@ionic/vue';
 import Page from '../views/Page.vue';
 import { api, safe, session, toast, peso, fmt, day, statusColor } from '../api';
-const role = session.user.role, isProv = role !== 'client' && role !== 'admin';
+const role = session.user.role;
 const plans = ref([]), sub = ref(null), e = ref(null), pays = ref([]), warranties = ref([]);
+const awaitingPayment = computed(() => e.value?.awaitingPayment || []);
 async function load() {
   if (role === 'client') { pays.value = await api('/payments'); warranties.value = (await api('/bookings')).filter((b) => b.warranty_until); return; }
   e.value = await api('/earnings'); sub.value = await api('/subscription');
@@ -19,20 +20,20 @@ const max = () => Math.max(1, ...months().map(([, v]) => v));
 <template>
   <Page :title="role === 'client' ? 'Payments & warranties' : 'Earnings & subscription'">
     <template v-if="role === 'client'">
-      <div class="card muted">Demo payment mode: recording a payment does not charge or transfer real money.</div>
+      <div class="card muted">Booking amounts are automatically recorded as paid when repairs are completed. These are demo records; no real money is charged or transferred.</div>
       <div class="card"><strong>Payment history</strong><p v-if="!pays.length" class="muted">No payments yet.</p>
         <div class="row sb" v-for="p in pays" :key="p.id" style="margin-top:8px"><span>#{{ p.booking_id }} {{ p.device }} <span class="muted">{{ fmt(p.created_at) }}</span></span><span><span class="badge" :class="statusColor(p.status)">{{ p.status }}</span> <strong>{{ peso(p.amount) }}</strong></span></div></div>
       <div class="card" style="margin-top:14px"><strong>Warranties</strong><p v-if="!warranties.length" class="muted">No warranties yet.</p>
         <div class="row sb" v-for="w in warranties" :key="w.id" style="margin-top:8px"><span>{{ w.device }} · {{ w.provider_label }}</span><span class="badge" :class="w.warranty_until * 1000 > Date.now() ? 'green' : 'red'">{{ w.warranty_until * 1000 > Date.now() ? 'Valid until ' : 'Expired ' }}{{ day(w.warranty_until) }}</span></div></div>
     </template>
     <template v-else-if="e">
-      <div class="card muted" v-if="isProv">Demo mode: subscriptions are activated without a real charge; earnings and payouts are records only.</div>
-      <div class="grid"><div class="card"><div class="muted">Net earnings</div><div class="stat">{{ peso(e.net) }}</div></div><div class="card"><div class="muted">Gross</div><div class="stat">{{ peso(e.gross) }}</div></div><div class="card"><div class="muted">Commission paid</div><div class="stat">{{ peso(e.commission) }}</div></div>
+      <div class="grid"><div class="card"><div class="muted">Net earnings</div><div class="stat">{{ peso(e.net) }}</div></div><div class="card"><div class="muted">Gross</div><div class="stat">{{ peso(e.gross) }}</div></div><div class="card"><div class="muted">Commission paid</div><div class="stat">{{ peso(e.commission) }}</div></div><div class="card"><div class="muted">Completed · awaiting payment</div><div class="stat">{{ peso(awaitingPayment.reduce((sum, booking) => sum + booking.amount, 0)) }}</div><div class="muted">{{ awaitingPayment.length }} unpaid {{ awaitingPayment.length === 1 ? 'booking' : 'bookings' }}</div></div>
         <div class="card" v-if="!session.user.shop_id"><div class="muted">Subscription</div><div class="stat">{{ sub ? 'Active' : 'Inactive' }}</div><div class="muted" v-if="sub">Renews {{ day(sub.expires_at) }} · {{ sub.commission_pct }}% commission</div></div></div>
       <div class="card" style="margin-top:14px" v-if="months().length"><strong>Net by month</strong><div class="bars" style="margin-top:12px"><div v-for="[k, v] in months()" :key="k" :style="{ height: (v / max()) * 100 + '%' }" :title="peso(v)"><span>{{ k.slice(5) }}</span></div></div></div>
+      <div class="card scroll-x" style="margin-top:14px" v-if="awaitingPayment.length"><strong>Completed jobs awaiting payment</strong><table class="t"><tr><th>Booking</th><th>Amount</th><th>Status</th></tr><tr v-for="b in awaitingPayment" :key="b.booking_id"><td>#{{ b.booking_id }} {{ b.device }}</td><td>{{ peso(b.amount) }}</td><td>Awaiting client payment</td></tr></table></div>
       <div class="card" style="margin-top:14px" v-if="plans.length"><strong>Plans</strong><p class="muted">An active plan is required to accept bookings.</p>
         <div class="grid"><div class="card" v-for="p in plans" :key="p.id"><strong>{{ p.name }}</strong><div class="stat">{{ peso(p.price) }}</div><div class="muted">{{ p.interval_days }} days · {{ p.commission_pct }}% commission per job</div><ion-button size="small" style="margin-top:8px" @click="buy(p)">{{ sub ? 'Renew / switch' : 'Subscribe' }}</ion-button></div></div></div>
-      <div class="card scroll-x" style="margin-top:14px"><strong>Paid jobs</strong><table class="t"><tr><th>Booking</th><th>Date</th><th>Amount</th><th>Commission</th><th>Payout</th></tr><tr v-for="p in e.payments" :key="p.id"><td>#{{ p.booking_id }} {{ p.device }}</td><td>{{ fmt(p.created_at) }}</td><td>{{ peso(p.amount - p.platform_fee) }}</td><td>{{ peso(p.commission) }}</td><td>{{ p.status === 'refunded' ? 'refunded' : p.payout_status }}</td></tr></table></div>
+      <div class="card scroll-x" style="margin-top:14px"><strong>Completed bookings</strong><p v-if="!e.payments.length" class="muted">No completed bookings with earnings yet.</p><table v-else class="t"><tr><th>Booking</th><th>Date</th><th>Total</th><th>Commission</th><th>Your earnings</th><th>Payout</th></tr><tr v-for="p in e.payments" :key="p.id"><td>#{{ p.booking_id }} {{ p.device }}</td><td>{{ fmt(p.created_at) }}</td><td>{{ peso(p.amount - p.platform_fee) }}</td><td>{{ peso(p.commission) }}</td><td>{{ peso(p.amount - p.platform_fee - p.commission) }}</td><td>{{ p.status === 'refunded' ? 'refunded' : p.payout_status }}</td></tr></table></div>
     </template>
   </Page>
 </template>

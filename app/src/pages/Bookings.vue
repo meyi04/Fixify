@@ -55,7 +55,6 @@ const withWho = (b) => (role === 'client' ? b.provider_label : b.client_name);
           <template v-if="role === 'client'">
             <ion-button size="small" fill="outline" :router-link="'/messages?to=' + sel.provider_id" @click="sel = null">Message</ion-button>
             <ion-button size="small" color="danger" fill="outline" v-if="['requested', 'accepted'].includes(sel.status)" @click="send('cancel')">Cancel</ion-button>
-            <ion-button size="small" v-if="sel.status === 'completed' && sel.payment_status === 'unpaid'" @click="send('pay')">Demo pay {{ peso(sel.total) }}</ion-button>
             <ion-button size="small" fill="outline" v-if="sel.status === 'completed' && !sel.reviewed" @click="act = 'rate'">Rate</ion-button>
             <ion-button size="small" fill="clear" color="danger" @click="report">Report problem</ion-button>
           </template>

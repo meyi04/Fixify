@@ -12,7 +12,7 @@ const setStatus = (s, status) => safe(async () => { await api('/staff/' + s.id, 
 
 <template>
   <Page title="Staff access">
-    <template #actions><ion-button @click="show = !show">Add technician</ion-button></template>
+    <div class="row" style="margin-bottom:14px"><ion-button @click="show = !show">{{ show ? 'Cancel' : 'Add technician' }}</ion-button></div>
     <form class="card" v-if="show" @submit.prevent="add" style="margin-bottom:16px">
       <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
         <div class="field"><label>Name</label><input v-model="f.name" required /></div><div class="field"><label>Email</label><input type="email" v-model="f.email" required /></div>

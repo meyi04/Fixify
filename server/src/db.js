@@ -94,7 +94,7 @@ export async function create(collection, data) {
   });
 }
 
-export async function recordDemoBookingPayment(bookingId, data) {
+export async function completeBookingWithPayment(bookingId, bookingPatch, paymentData) {
   const bookingRef = ref('bookings', bookingId);
   const paymentRef = ref('_bookingPayments', bookingId);
   const counterRef = ref('_counters', 'payments');
@@ -102,14 +102,15 @@ export async function recordDemoBookingPayment(bookingId, data) {
     const [booking, existingPayment, counter] = await Promise.all([
       transaction.get(bookingRef), transaction.get(paymentRef), transaction.get(counterRef),
     ]);
-    if (!booking.exists || booking.data().status !== 'completed'
-      || (booking.data().payment_status && booking.data().payment_status !== 'unpaid')
-      || existingPayment.exists) return false;
+    if (!booking.exists || !['in_progress', 'completed'].includes(booking.data().status)
+      || booking.data().payment_status === 'refunded' || existingPayment.exists) return false;
+    if (booking.data().status === 'in_progress'
+      && booking.data().payment_status && booking.data().payment_status !== 'unpaid') return false;
     const id = (counter.data()?.value ?? 0) + 1;
     transaction.set(counterRef, { value: id });
-    transaction.create(ref('payments', id), { id, ...data });
+    transaction.create(ref('payments', id), { id, ...paymentData });
     transaction.create(paymentRef, { payment_id: id });
-    transaction.update(bookingRef, { payment_status: 'paid', updated_at: Math.floor(Date.now() / 1000) });
+    transaction.update(bookingRef, { ...bookingPatch, payment_status: 'paid', updated_at: Math.floor(Date.now() / 1000) });
     return true;
   });
 }
@@ -186,13 +187,15 @@ export async function remove(collection, id) {
 }
 
 export async function updateMany(collection, where, patch) {
-  const rows = await list(collection, { where });
-  for (let offset = 0; offset < rows.length; offset += 400) {
+  let query = db.collection(collection);
+  for (const [field, operator, value] of where) query = query.where(field, operator, value);
+  const snapshot = await query.get();
+  for (let offset = 0; offset < snapshot.docs.length; offset += 400) {
     const batch = db.batch();
-    rows.slice(offset, offset + 400).forEach((row) => batch.set(ref(collection, row.id), patch, { merge: true }));
+    snapshot.docs.slice(offset, offset + 400).forEach((document) => batch.set(document.ref, patch, { merge: true }));
     await batch.commit();
   }
-  return rows.length;
+  return snapshot.size;
 }
 
 export const setting = async (key, fallback) => (await get('settings', key))?.value ?? fallback;
