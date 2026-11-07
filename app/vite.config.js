@@ -1,9 +1,10 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-vue'
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [react()],
   build: {
-    outDir: 'dist',
+    outDir: mode === 'vercel' ? '../dist' : 'dist',
+    emptyOutDir: mode === 'vercel',
   },
-})
+}))
